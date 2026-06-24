@@ -1,0 +1,12 @@
+# Normalize line endings to LF on checkout/commit.
+* text=auto eol=lf
+
+# Keep the distributed package lean: exclude dev, test, and CI files from the
+# archive that `composer require` downloads.
+/.github            export-ignore
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/phpunit.xml        export-ignore
+/phpstan.neon       export-ignore
+/pint.json          export-ignore
