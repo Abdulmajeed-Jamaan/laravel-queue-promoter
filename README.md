@@ -8,7 +8,9 @@ With the Redis driver, delayed jobs live in a `:delayed` sorted set and reserved
 
 ## How it works
 
-It subclasses Laravel's own `Illuminate\Queue\Worker` and overrides a single method (`getNextJob`) to call the Redis driver's public `migrateExpiredJobs()` instead of reserving a job. Everything else — the daemon loop, `--sleep`, signal handling, `queue:restart`, pause/resume, `--memory`/`--max-time` — is inherited from the framework unchanged.
+It runs Laravel's **stock** `queue:work` worker, unchanged, against a Redis connection that promotes instead of reserves. `RedisQueue::pop()` already migrates due delayed and expired reserved jobs onto the ready list *before* it reserves one; a `PromotingRedisQueue` simply overrides the reserve step to return nothing, so each pass promotes but hands the worker no job.
+
+The `queue:promote` command wires this up entirely through public APIs: it registers a `redis-promoter` connector and points a throwaway connection — a copy of your real connection's config — at it, then runs the stock worker against that. Your actual `redis` connection is never modified, so real `queue:work` workers are unaffected. Everything else — the daemon loop, `--sleep`, signal handling, `queue:restart`, pause/resume, `--memory`/`--max-time` — is the framework's own behaviour, untouched. (The promoting queue reports your real connection's name, so `queue:pause`/`queue:restart` and pop events resolve correctly.)
 
 ## Installation
 
