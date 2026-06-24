@@ -4,6 +4,8 @@ namespace AbdulmajeedJamaan\QueuePromoter\Commands;
 
 use AbdulmajeedJamaan\QueuePromoter\PromotingRedisConnector;
 use Illuminate\Contracts\Cache\Repository as Cache;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Queue\Console\WorkCommand;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Queue\Worker;
@@ -27,7 +29,7 @@ class PromoteWorkCommand extends WorkCommand
      */
     protected function runWorker($connection, $queue)
     {
-        /** @var \Illuminate\Contracts\Config\Repository $config */
+        /** @var Repository $config */
         $config = $this->laravel['config'];
 
         if ($config->get("queue.connections.{$connection}.driver") !== 'redis') {
@@ -38,7 +40,7 @@ class PromoteWorkCommand extends WorkCommand
             return self::FAILURE;
         }
 
-        /** @var \Illuminate\Contracts\Redis\Factory $redis */
+        /** @var Factory $redis */
         $redis = $this->laravel['redis'];
 
         /** @var QueueManager $manager */
