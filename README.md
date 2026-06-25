@@ -8,7 +8,7 @@
 - [Usage](#usage)
     - [Command Options](#command-options)
 - [Running the Promoter](#running-the-promoter)
-    - [As a Long-Running Daemon](#as-a-daemon)
+    - [As a Long-Running Daemon](#as-a-long-running-daemon)
     - [Via the Scheduler](#via-the-scheduler)
 - [How It Works](#how-it-works)
 - [Testing](#testing)
@@ -114,7 +114,7 @@ php artisan queue:promote redis --sleep=1 --max-time=3600
 
 A single promoter instance is enough to keep your ready list accurate. You may run it as a long-running process or let the scheduler drive it.
 
-<a name="as-a-daemon"></a>
+<a name="as-a-long-running-daemon"></a>
 ### As a Long-Running Daemon
 
 You may run the promoter under a process monitor such as Supervisor, systemd, or Kubernetes:
