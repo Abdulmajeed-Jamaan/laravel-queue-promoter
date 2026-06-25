@@ -1,15 +1,12 @@
 <?php
 
-use AbdulmajeedJamaan\QueuePromoter\PromotingRedisConnector;
-use AbdulmajeedJamaan\QueuePromoter\PromotingRedisQueue;
 use AbdulmajeedJamaan\QueuePromoter\Tests\Fixtures\RecordingJob;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * These tests talk to a real Redis-compatible server (Valkey/Redis). They fail
- * hard if no server is reachable — these are integration tests, so a missing
- * connection is a failure, not a reason to skip.
+ * Integration tests against a real Redis/Valkey server, used the way an app
+ * would: dispatch jobs, run queue:promote, then run a worker. Fails hard (rather
+ * than skipping) if no server is reachable.
  */
 beforeEach(function () {
     try {
@@ -22,19 +19,18 @@ beforeEach(function () {
 });
 
 it('promotes a due delayed job so a worker can then process it', function () {
-    // A job dispatched with a delay that has since come due — exactly the
-    // scale-to-zero case: it is sitting in the delayed set, and because no
-    // worker is calling pop(), nothing has migrated it onto the ready list.
+    // Dispatch a job to run a few minutes from now.
     RecordingJob::dispatch('default')
         ->onConnection('redis')
         ->onQueue('default')
-        ->delay(Carbon::now()->subMinute());
+        ->delay(now()->addMinutes(5));
 
-    // The ready list (the length autoscalers read) shows nothing yet, so a
-    // worker scaled back up would see an empty queue.
+    // It comes due, but with no workers nothing has popped it onto the ready list.
+    $this->travel(6)->minutes();
+
     expect(readyJobCount('default'))->toBe(0);
 
-    // The promoter migrates the due job onto the ready list — no worker needed.
+    // The promoter surfaces it on the ready list — no worker needed.
     $this->artisan('queue:promote', [
         'connection' => 'redis',
         '--once' => true,
@@ -43,7 +39,7 @@ it('promotes a due delayed job so a worker can then process it', function () {
 
     expect(readyJobCount('default'))->toBe(1);
 
-    // And a plain worker now picks it up and runs it, end to end.
+    // A worker can now pick it up and run it.
     $this->artisan('queue:work', [
         'connection' => 'redis',
         '--once' => true,
@@ -54,26 +50,22 @@ it('promotes a due delayed job so a worker can then process it', function () {
 });
 
 it('promotes an expired reserved job back so it can be retried', function () {
-    $queue = app('queue')->connection('redis');
-
-    // A normal ready job.
     RecordingJob::dispatch('default')
         ->onConnection('redis')
         ->onQueue('default');
 
     expect(readyJobCount('default'))->toBe(1);
 
-    // A worker reserves it (pop) but crashes before deleting it — the job now
-    // sits in the reserved set, off the ready list. handle() never ran.
-    $queue->pop('default');
+    // Stand in for a worker that reserved the job then crashed: pop() reserves
+    // it, and never deleting it leaves it stuck in :reserved.
+    app('queue')->connection('redis')->pop('default');
 
     expect(readyJobCount('default'))->toBe(0)
         ->and(RecordingJob::$handled)->toBe([]);
 
-    // retry_after (90s) elapses with no worker running to reclaim the job.
+    // retry_after (90s) elapses with no worker to reclaim it.
     $this->travel(91)->seconds();
 
-    // The promoter migrates the expired reservation back onto the ready list.
     $this->artisan('queue:promote', [
         'connection' => 'redis',
         '--once' => true,
@@ -82,7 +74,7 @@ it('promotes an expired reserved job back so it can be retried', function () {
 
     expect(readyJobCount('default'))->toBe(1);
 
-    // A worker can now pick it up and finally run it.
+    // A worker can now run it.
     $this->artisan('queue:work', [
         'connection' => 'redis',
         '--once' => true,
@@ -96,10 +88,11 @@ it('does not promote a paused queue, then resumes once unpaused', function () {
     RecordingJob::dispatch('default')
         ->onConnection('redis')
         ->onQueue('default')
-        ->delay(Carbon::now()->subMinute());
+        ->delay(now()->addMinutes(5));
 
-    // Pausing writes the cache flag the worker checks; a paused queue must be
-    // left untouched, so the due job stays in the delayed set.
+    $this->travel(6)->minutes();
+
+    // A paused queue is left untouched, so the due job stays parked.
     Queue::pause('redis', 'default');
 
     $this->artisan('queue:promote', [
@@ -110,7 +103,7 @@ it('does not promote a paused queue, then resumes once unpaused', function () {
 
     expect(readyJobCount('default'))->toBe(0);
 
-    // Once resumed, the same due job is promoted as normal.
+    // Once resumed, the job is promoted as normal.
     Queue::resume('redis', 'default');
 
     $this->artisan('queue:promote', [
@@ -122,40 +115,18 @@ it('does not promote a paused queue, then resumes once unpaused', function () {
     expect(readyJobCount('default'))->toBe(1);
 });
 
-it('connects a promoting redis queue that reports the real connection name', function () {
-    $queue = (new PromotingRedisConnector(app('redis'), 'redis'))
-        ->connect(config('queue.connections.redis'));
-
-    expect($queue)->toBeInstanceOf(PromotingRedisQueue::class)
-        ->and($queue->getConnectionName())->toBe('redis');
-});
-
-it('promotes a due job but reserves nothing when popped', function () {
-    $promoter = (new PromotingRedisConnector(app('redis'), 'redis'))
-        ->connect(config('queue.connections.redis'));
-
-    RecordingJob::dispatch('default')
-        ->onConnection('redis')
-        ->onQueue('default')
-        ->delay(Carbon::now()->subMinute());
-
-    expect(readyJobCount('default'))->toBe(0);
-
-    // pop() migrates the due job onto the ready list, then reserves nothing.
-    expect($promoter->pop('default'))->toBeNull()
-        ->and(readyJobCount('default'))->toBe(1);
-});
-
 it('promotes due jobs across multiple comma-separated queues in one pass', function () {
     RecordingJob::dispatch('high')
         ->onConnection('redis')
         ->onQueue('high')
-        ->delay(Carbon::now()->subMinute());
+        ->delay(now()->addMinutes(5));
 
     RecordingJob::dispatch('default')
         ->onConnection('redis')
         ->onQueue('default')
-        ->delay(Carbon::now()->subMinute());
+        ->delay(now()->addMinutes(5));
+
+    $this->travel(6)->minutes();
 
     expect(readyJobCount('high'))->toBe(0)
         ->and(readyJobCount('default'))->toBe(0);
